@@ -1,18 +1,14 @@
 import ply.yacc as yacc
 from Fase1 import TipoToken
 
-# ==============================================================================
-# Fase 2 - Analizador Sintáctico 
-# ==============================================================================
-
-# ======================================================================
+# Fase 2 - Analizador Sintáctico LALR(1) con Integración Semántica (MiniLang)
+#operador
 # 3. ADAPTADOR LÉXICO (Puente entre Fase 1 y PLY)
-# ======================================================================
 class AdaptadorLexicoPLY:
-    def __init__(self, lista_tokens):
-        # Filtramos EOF si existe, PLY maneja el final automáticamente devolviendo None
+    def __init__(self, lista_tokens, parser_ref=None):
         self.lista_tokens = [t for t in lista_tokens if t.tipo != TipoToken.FIN_ARCHIVO]
         self.pos = 0
+        self.parser_ref = parser_ref 
 
     def token(self):
         if self.pos < len(self.lista_tokens):
@@ -24,15 +20,15 @@ class AdaptadorLexicoPLY:
             tok_ply.value = tok_original.valor
             tok_ply.lineno = tok_original.linea
             tok_ply.lexpos = tok_original.col_inicio
+            #guardar último token
+            if self.parser_ref:
+                self.parser_ref.ultimo_token = tok_ply
             return tok_ply
         return None
 
-# ==========================================
-# 4. ANALIZADOR SINTÁCTICO 
-# ==========================================
+# 4. ANALIZADOR SINTÁCTICO (PARSER LALR)
 class AnalizadorSintactico:
     # Lista de tokens (Sin LLAVE_IZQ, LLAVE_DER ni PUNTO_Y_COMA para evitar warnings)
-    # Correción: Se eliminaron los tokens que no se usan en esta fase para evitar warnings de PLY.
     tokens = [
         'ID', 'NUMERO_ENTERO', 'NUMERO_FLOTANTE', 'CADENA_LITERAL', 'BOOLEANO_LITERAL',
         'SUMA', 'RESTA', 'MULTIPLICACION', 'DIVISION', 'MODULO',
@@ -55,12 +51,11 @@ class AnalizadorSintactico:
 
     def __init__(self, semantico):
         self.errores_sintacticos = []
-        self.semantico = semantico  # Conexión directa con la Tabla de Símbolos de la Fase 3
+        self.semantico = semantico
+        self.ultimo_token = None  
         self.parser = yacc.yacc(module=self)
 
-    # ==========================================
     # REGLAS GRAMATICALES BNF -> PLY
-    # ==========================================
     def p_program(self, p):
         '''program : statement_list'''
         pass
@@ -115,6 +110,12 @@ class AnalizadorSintactico:
                 if expr and expr.get('tipo') != 'error':
                     self.semantico.asignar_valor(nombre_var, expr['valor'], expr['tipo'], linea)
 
+    def p_var_decl_error(self, p):
+        '''var_decl : type ID ASIGNACION error NUEVA_LINEA'''
+        self.errores_sintacticos.append(
+            f"Línea {p.lineno(3)} | Error Sintáctico: Expresión inválida en la asignación."
+        )
+
     def p_assignment(self, p):
         '''assignment : ID ASIGNACION expression NUEVA_LINEA'''
         nombre_var = p[1]
@@ -129,6 +130,12 @@ class AnalizadorSintactico:
     def p_if_stmt(self, p):
         '''if_stmt : IF expression DOS_PUNTOS NUEVA_LINEA INDENTAR statement_list DESINDENTAR else_clause'''
         pass
+    
+    def p_if_error(self, p):
+        '''if_stmt : IF error DOS_PUNTOS NUEVA_LINEA INDENTAR statement_list DESINDENTAR'''
+        self.errores_sintacticos.append(
+            f"Línea {p.lineno(1)} | Error Sintáctico: Condición inválida en 'if'."
+        )
 
     def p_else_clause(self, p):
         '''else_clause : ELSE DOS_PUNTOS NUEVA_LINEA INDENTAR statement_list DESINDENTAR
@@ -138,6 +145,12 @@ class AnalizadorSintactico:
     def p_while_stmt(self, p):
         '''while_stmt : WHILE expression DOS_PUNTOS NUEVA_LINEA INDENTAR statement_list DESINDENTAR'''
         pass
+
+    def p_while_error(self, p):
+        '''while_stmt : WHILE error DOS_PUNTOS NUEVA_LINEA INDENTAR statement_list DESINDENTAR'''
+        self.errores_sintacticos.append(
+            f"Línea {p.lineno(1)} | Error Sintáctico: Condición inválida en 'while'."
+        )
 
     def p_func_decl(self, p):
         '''func_decl : DEF ID PARENTESIS_IZQ param_list PARENTESIS_DER DOS_PUNTOS NUEVA_LINEA INDENTAR statement_list DESINDENTAR'''
@@ -156,7 +169,13 @@ class AnalizadorSintactico:
     def p_func_call_stmt(self, p):
         '''func_call_stmt : ID PARENTESIS_IZQ arg_list PARENTESIS_DER NUEVA_LINEA'''
         pass
-
+    
+    def p_func_call_error(self, p):
+        '''func_call_stmt : ID PARENTESIS_IZQ error PARENTESIS_DER NUEVA_LINEA'''
+        self.errores_sintacticos.append(
+            f"Línea {p.lineno(1)} | Error Sintáctico: Argumentos inválidos en llamada a función."
+        )
+    
     def p_io_stmt(self, p):
         '''io_stmt : READ PARENTESIS_IZQ ID PARENTESIS_DER NUEVA_LINEA
                    | WRITE PARENTESIS_IZQ expression PARENTESIS_DER NUEVA_LINEA'''
@@ -182,7 +201,23 @@ class AnalizadorSintactico:
                       | expression AND expression
                       | expression OR expression'''
         izq = p[1]
-        operador = p[2]
+        tipo_token = p.slice[2].type
+        mapa_operadores = {
+            'SUMA': '+',
+            'RESTA': '-',
+            'MULTIPLICACION': '*',
+            'DIVISION': '/',
+            'MODULO': '%',
+            'MAYOR_QUE': '>',
+            'MENOR_QUE': '<',
+            'MAYOR_IGUAL': '>=',
+            'MENOR_IGUAL': '<=',
+            'IGUAL_QUE': '==',
+            'DIFERENTE_QUE': '!=',
+            'AND': 'and',
+            'OR': 'or'
+        }
+        operador = mapa_operadores.get(tipo_token)
         der = p[3]
         linea = p.lineno(2)
 
@@ -204,7 +239,7 @@ class AnalizadorSintactico:
                 elif operador == '/': 
                     res_valor = izq['valor'] / der['valor'] if der['valor'] != 0 else 0
             except:
-                pass # Manejo de errores matemáticos extremos
+                pass # Manejo silencioso de errores matemáticos extremos
 
         p[0] = {'tipo': res_tipo, 'valor': res_valor}
 
@@ -262,12 +297,42 @@ class AnalizadorSintactico:
 
     # --- MANEJO DE ERRORES ---
     def p_error(self, p):
-        if p:
-            error_msg = f"Línea {p.lineno}, Columna {p.lexpos} | Error Sintáctico: Token inesperado '{p.value}' (Tipo: {p.type})."
-            self.errores_sintacticos.append(error_msg)
-            self.parser.errok() # Recuperación
+        if not p:
+            self.errores_sintacticos.append(
+                "Error Sintáctico: Fin de archivo inesperado. Posible instrucción incompleta."
+            )
+            return
+        tipo = p.type
+        valor = p.value
+        linea = p.lineno
+        if tipo == 'NUEVA_LINEA':
+            if self.ultimo_token:
+                if self.ultimo_token.type == 'ASIGNACION':
+                    msg = f"Línea {linea} | Error Sintáctico: Falta una expresión después del '='."
+                elif self.ultimo_token.type in ['SUMA', 'RESTA', 'MULTIPLICACION', 'DIVISION', 'MODULO']:
+                    msg = f"Línea {linea} | Error Sintáctico: Operador sin operando derecho."
+                elif self.ultimo_token.type in ['MAYOR_QUE', 'MENOR_QUE', 'IGUAL_QUE']:
+                    msg = f"Línea {linea} | Error Sintáctico: Comparación incompleta."
+                else:
+                    msg = f"Línea {linea} | Error Sintáctico: La instrucción está incompleta."
+            else:
+                msg = f"Línea {linea} | Error Sintáctico: Salto de línea inesperado."
+
+        elif tipo == 'INDENTAR':
+            msg = f"Línea {linea} | Error Sintáctico: Indentación inesperada."
+        elif tipo == 'DESINDENTAR':
+            msg = f"Línea {linea} | Error Sintáctico: Cierre de bloque inesperado o mala indentación."
+        elif tipo == 'ID':
+            msg = f"Línea {linea} | Error Sintáctico: Identificador inesperado '{valor}'. Puede faltar operador o palabra clave."
+        elif tipo in ['SUMA', 'RESTA', 'MULTIPLICACION', 'DIVISION']:
+            msg = f"Línea {linea} | Error Sintáctico: Operador '{valor}' mal ubicado."
+        elif tipo == 'DOS_PUNTOS':
+            msg = f"Línea {linea} | Error Sintáctico: Uso incorrecto de ':'."
         else:
-            self.errores_sintacticos.append("Error Sintáctico: Fin de archivo (EOF) inesperado.")
+            msg = f"Línea {linea} | Error Sintáctico: Token inesperado '{valor}' (Tipo: {tipo})."
+
+        self.errores_sintacticos.append(msg)
+        self.parser.errok()
 
     def analizar_sintaxis(self, adaptador_lexico):
         self.errores_sintacticos = []
