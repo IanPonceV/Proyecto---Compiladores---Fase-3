@@ -95,7 +95,7 @@ class AnalizadorLexico:
             "if": TipoToken.IF, "else": TipoToken.ELSE, "while": TipoToken.WHILE,
             "int": TipoToken.INT, "float": TipoToken.FLOAT, "string": TipoToken.STRING,
             "bool": TipoToken.BOOL, "void": TipoToken.VOID, "return": TipoToken.RETURN,
-            "def": TipoToken.DEF, "Read": TipoToken.READ, "Write": TipoToken.WRITE,
+            "def": TipoToken.DEF, "read": TipoToken.READ, "write": TipoToken.WRITE,
             "true": TipoToken.BOOLEANO_LITERAL, "false": TipoToken.BOOLEANO_LITERAL,
             "and": TipoToken.AND, "or": TipoToken.OR, "not": TipoToken.NOT
         }
