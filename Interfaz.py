@@ -288,8 +288,8 @@ class InterfazMiniLang:
         semantico = AnalizadorSemantico()
 
         # 4. FASE 2: Análisis Sintáctico (Nutre la memoria semántica)
-        adaptador = AdaptadorLexicoPLY(tokens)
         parser = AnalizadorSintactico(semantico)
+        adaptador = AdaptadorLexicoPLY(tokens, parser) 
         err_sintacticos = parser.analizar_sintaxis(adaptador)
 
         if err_sintacticos:
